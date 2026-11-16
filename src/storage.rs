@@ -15,6 +15,8 @@ pub struct SavedArticle {
     pub scroll_position: f64,
     pub saved_at: String,
     pub last_read_at: Option<String>,
+    pub prev_url: Option<String>,
+    pub next_url: Option<String>,
 }
 
 pub struct Storage {
@@ -68,7 +70,9 @@ impl Storage {
                 reading_time_mins INTEGER NOT NULL DEFAULT 0,
                 scroll_position REAL NOT NULL DEFAULT 0.0,
                 saved_at        TEXT NOT NULL DEFAULT (datetime('now')),
-                last_read_at    TEXT
+                last_read_at    TEXT,
+                prev_url        TEXT,
+                next_url        TEXT
             );
 
             CREATE TABLE IF NOT EXISTS reading_history (
@@ -78,6 +82,9 @@ impl Storage {
                 opened_at       TEXT NOT NULL DEFAULT (datetime('now'))
             );"
         )?;
+        // Add columns if migrating an existing database
+        let _ = self.conn.execute("ALTER TABLE articles ADD COLUMN prev_url TEXT", []);
+        let _ = self.conn.execute("ALTER TABLE articles ADD COLUMN next_url TEXT", []);
         Ok(())
     }
 
@@ -90,18 +97,22 @@ impl Storage {
         html_content: &str,
         text_content: &str,
         reading_time_mins: i32,
+        prev_url: Option<&str>,
+        next_url: Option<&str>,
     ) -> Result<i64, rusqlite::Error> {
         self.conn.execute(
-            "INSERT INTO articles (url, title, byline, html_content, text_content, reading_time_mins)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO articles (url, title, byline, html_content, text_content, reading_time_mins, prev_url, next_url)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(url) DO UPDATE SET
                 title = excluded.title,
                 byline = excluded.byline,
                 html_content = excluded.html_content,
                 text_content = excluded.text_content,
                 reading_time_mins = excluded.reading_time_mins,
+                prev_url = excluded.prev_url,
+                next_url = excluded.next_url,
                 saved_at = datetime('now')",
-            params![url, title, byline, html_content, text_content, reading_time_mins],
+            params![url, title, byline, html_content, text_content, reading_time_mins, prev_url, next_url],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -128,7 +139,7 @@ impl Storage {
     pub fn get_article(&self, url: &str) -> Result<Option<SavedArticle>, rusqlite::Error> {
         let mut stmt = self.conn.prepare(
             "SELECT id, url, title, byline, html_content, text_content, reading_time_mins,
-                    scroll_position, saved_at, last_read_at
+                    scroll_position, saved_at, last_read_at, prev_url, next_url
              FROM articles WHERE url = ?1",
         )?;
         let mut rows = stmt.query_map(params![url], |row| {
@@ -143,6 +154,8 @@ impl Storage {
                 scroll_position: row.get(7)?,
                 saved_at: row.get(8)?,
                 last_read_at: row.get(9)?,
+                prev_url: row.get(10)?,
+                next_url: row.get(11)?,
             })
         })?;
         match rows.next() {
@@ -156,7 +169,7 @@ impl Storage {
     pub fn list_articles(&self) -> Result<Vec<SavedArticle>, rusqlite::Error> {
         let mut stmt = self.conn.prepare(
             "SELECT id, url, title, byline, html_content, text_content, reading_time_mins,
-                    scroll_position, saved_at, last_read_at
+                    scroll_position, saved_at, last_read_at, prev_url, next_url
              FROM articles ORDER BY saved_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -171,6 +184,8 @@ impl Storage {
                 scroll_position: row.get(7)?,
                 saved_at: row.get(8)?,
                 last_read_at: row.get(9)?,
+                prev_url: row.get(10)?,
+                next_url: row.get(11)?,
             })
         })?;
         rows.collect()
@@ -208,6 +223,8 @@ mod tests {
                 "<p>Hello world</p>",
                 "Hello world",
                 5,
+                Some("https://example.com/art0"),
+                Some("https://example.com/art2"),
             )
             .expect("save article succeeds");
 
@@ -222,6 +239,8 @@ mod tests {
         assert_eq!(article.reading_time_mins, 5);
         assert_eq!(article.text_content, "Hello world");
         assert_eq!(article.scroll_position, 0.0);
+        assert_eq!(article.prev_url.as_deref(), Some("https://example.com/art0"));
+        assert_eq!(article.next_url.as_deref(), Some("https://example.com/art2"));
         assert!(article.last_read_at.is_none());
     }
 
@@ -230,7 +249,7 @@ mod tests {
         let storage = Storage::open_in_memory().expect("in-memory db opens");
 
         storage
-            .save_article("https://example.com/art2", "Title 2", "", "", "Body", 2)
+            .save_article("https://example.com/art2", "Title 2", "", "", "Body", 2, None, None)
             .unwrap();
 
         storage
@@ -248,10 +267,10 @@ mod tests {
         let storage = Storage::open_in_memory().expect("in-memory db opens");
 
         let id1 = storage
-            .save_article("https://example.com/1", "Article 1", "", "", "", 1)
+            .save_article("https://example.com/1", "Article 1", "", "", "", 1, None, None)
             .unwrap();
         let _id2 = storage
-            .save_article("https://example.com/2", "Article 2", "", "", "", 2)
+            .save_article("https://example.com/2", "Article 2", "", "", "", 2, None, None)
             .unwrap();
 
         let list = storage.list_articles().unwrap();

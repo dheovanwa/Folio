@@ -7,11 +7,14 @@ pub fn generate_css(config: &Config) -> String {
     let accent = config.accent_color();
     let meta = config.meta_color();
     let hdr_bg = config.headerbar_bg();
-    let font = &config.font_family;
+    let hdr_fg = config.headerbar_fg();
+    let clean_font = config.font_family.trim().trim_matches('"').trim_matches('\'').trim();
+    let clean_font = if clean_font.is_empty() { "Times New Roman" } else { clean_font };
     let font_size = config.font_size as i32;
     let line_height = config.line_height;
     let letter_spacing = config.letter_spacing;
     let margin = config.margin as i32;
+    let paragraph_spacing = config.paragraph_spacing_px;
 
     format!(
         r#"
@@ -23,20 +26,20 @@ window, .main-box {{
 
 headerbar {{
     background-color: {hdr_bg};
-    color: {fg};
+    color: {hdr_fg};
     border-bottom: none;
     box-shadow: none;
 }}
 
 headerbar entry {{
-    background-color: alpha({fg}, 0.08);
-    color: {fg};
+    background-color: alpha({hdr_fg}, 0.08);
+    color: {hdr_fg};
     border-radius: 8px;
     min-height: 32px;
 }}
 
 headerbar button {{
-    color: {fg};
+    color: {hdr_fg};
 }}
 
 /* ── Reading Progress ── */
@@ -56,14 +59,75 @@ headerbar button {{
 }}
 
 /* ── Article Container ── */
-.article-viewport {{
+.article-viewport, .reader-surface {{
     background-color: {bg};
+}}
+
+.article-list-view {{
+    background-color: {bg};
+    padding-top: 40px;
+    padding-bottom: 120px;
+}}
+
+listview.article-list-view,
+listview.article-list-view row,
+listview.article-list-view > row {{
+    background-color: transparent;
+    border: none;
+    outline: none;
+    box-shadow: none;
+    padding: 0;
+    margin: 0;
+}}
+
+listview.article-list-view row:hover,
+listview.article-list-view row:selected,
+listview.article-list-view row:focus {{
+    background-color: transparent;
+}}
+
+.article-block-container {{
+    padding-left: {margin}px;
+    padding-right: {margin}px;
+}}
+
+/* ── Typography & Explicit Label Targeting ── */
+.reader-surface,
+.reader-surface label,
+.article-viewport,
+.article-viewport label,
+.article-list-view,
+.article-list-view label,
+listview > row label,
+listview.article-list-view > row label,
+.article-block-container label,
+.article-content,
+.article-content label,
+.article-title,
+.article-byline,
+.article-reading-time,
+.article-heading,
+.article-h2,
+.article-h3,
+.article-paragraph,
+.article-body-text,
+.article-quote,
+.article-blockquote,
+.article-list-item,
+.article-divider {{
+    font-family: "{clean_font}", serif;
+}}
+
+.article-code,
+.article-codeblock,
+.article-code label,
+.article-codeblock label {{
+    font-family: monospace;
 }}
 
 .article-content {{
     background-color: {bg};
     color: {fg};
-    font-family: "{font}";
     font-size: {font_size}px;
     padding: 40px {margin}px 120px {margin}px;
     line-height: {line_height};
@@ -131,30 +195,28 @@ headerbar button {{
     color: {fg};
     line-height: {line_height};
     letter-spacing: {letter_spacing}px;
-    margin-bottom: 16px;
+    margin-bottom: {paragraph_spacing}px;
 }}
 
-.article-blockquote {{
+.article-blockquote,
+.article-quote {{
     border-left: 3px solid {accent};
     padding-left: 16px;
     margin-top: 12px;
-    margin-bottom: 16px;
-}}
-
-.article-blockquote-text {{
+    margin-bottom: {paragraph_spacing}px;
     font-style: italic;
     font-size: {font_size}px;
     color: {meta};
     line-height: {line_height};
 }}
 
-.article-codeblock {{
+.article-codeblock,
+.article-code {{
     background-color: alpha({fg}, 0.07);
     border-radius: 6px;
     padding: 12px 16px;
     margin-top: 10px;
-    margin-bottom: 16px;
-    font-family: monospace;
+    margin-bottom: {paragraph_spacing}px;
     font-size: {code_size}px;
 }}
 
@@ -164,6 +226,36 @@ headerbar button {{
     line-height: {line_height};
     margin-bottom: 6px;
     margin-left: 16px;
+}}
+
+.article-divider {{
+    font-size: {font_size}px;
+    color: {meta};
+    margin-top: 18px;
+    margin-bottom: 24px;
+    letter-spacing: 4px;
+}}
+
+/* ── Reader Navigation Row & Buttons ── */
+.reader-nav-row {{
+    margin-top: 24px;
+    margin-bottom: 36px;
+}}
+
+.reader-nav-btn {{
+    padding: 10px 22px;
+    font-size: 15px;
+    font-weight: 600;
+    border-radius: 9999px;
+    background-color: alpha({accent}, 0.12);
+    color: {accent};
+    border: 1px solid alpha({accent}, 0.25);
+    transition: all 180ms ease;
+}}
+
+.reader-nav-btn:hover {{
+    background-color: alpha({accent}, 0.24);
+    border-color: {accent};
 }}
 
 /* ── Max Width Wrapper ── */
@@ -201,17 +293,17 @@ headerbar button {{
 /* ── Settings Sidebar ── */
 .settings-sidebar {{
     background-color: {hdr_bg};
-    color: {fg};
+    color: {hdr_fg};
     padding: 16px;
-    border-left: 1px solid alpha({fg}, 0.1);
+    border-left: 1px solid alpha({hdr_fg}, 0.1);
 }}
 
 .settings-sidebar label {{
-    color: {fg};
+    color: {hdr_fg};
 }}
 
 .settings-sidebar scale trough {{
-    background-color: alpha({fg}, 0.12);
+    background-color: alpha({hdr_fg}, 0.12);
 }}
 
 .settings-sidebar scale highlight {{
@@ -232,7 +324,7 @@ headerbar button {{
     min-height: 36px;
     border-radius: 20px;
     padding: 0;
-    border: 2px solid alpha({fg}, 0.15);
+    border: 2px solid alpha({hdr_fg}, 0.15);
 }}
 .theme-btn:checked {{
     border: 3px solid {accent};
@@ -245,6 +337,9 @@ headerbar button {{
 }}
 .theme-btn-dark {{
     background-color: #1e1e2e;
+}}
+.theme-btn-charcoal {{
+    background-color: #161616;
 }}
 .theme-btn-oled {{
     background-color: #000000;
@@ -288,6 +383,12 @@ link, .article-body link {{
     )
 }
 
+/// Alias for generate_css
+#[allow(dead_code)]
+pub fn generate_gtk_css(config: &Config) -> String {
+    generate_css(config)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,6 +400,18 @@ mod tests {
         assert!(css.contains(".article-content"));
         assert!(css.contains("#faf8f5"));
         assert!(css.contains("font-size: 18px"));
+        assert!(css.contains("Times New Roman"));
+        assert!(css.contains("margin-bottom: 16px"));
+    }
+
+    #[test]
+    fn test_generate_css_custom_font_and_spacing() {
+        let mut config = Config::default();
+        config.font_family = "Inter".into();
+        config.paragraph_spacing_px = 24;
+        let css = generate_gtk_css(&config);
+        assert!(css.contains("font-family: \"Inter\", serif;"));
+        assert!(css.contains("margin-bottom: 24px;"));
     }
 
     #[test]
@@ -323,10 +436,19 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_css_charcoal_theme() {
+        let mut config = Config::default();
+        config.theme = "charcoal".into();
+        let css = generate_css(&config);
+        assert!(css.contains("#161616"));
+        assert!(css.contains("#e4e4e4"));
+    }
+
+    #[test]
     fn test_gtk_css_provider_validity() {
         if gtk::init().is_ok() {
             let provider = gtk::CssProvider::new();
-            for theme_name in &["light", "sepia", "dark", "oled", "custom"] {
+            for theme_name in &["light", "sepia", "dark", "charcoal", "oled", "custom"] {
                 let mut config = Config::default();
                 config.theme = (*theme_name).to_string();
                 let css = generate_css(&config);

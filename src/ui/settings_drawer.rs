@@ -39,7 +39,7 @@ pub fn build_settings_sidebar(
 
     let is_syncing = Rc::new(Cell::new(false));
 
-    // Debounced config persistence helper to prevent synchronous disk I/O while dragging sliders
+    // Debounced config persistence helper (350ms) to eliminate disk I/O lag while modifying settings
     let save_timeout: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
     let request_save: Rc<dyn Fn()> = {
         let config = config.clone();
@@ -51,7 +51,7 @@ pub fn build_settings_sidebar(
             let cfg = config.clone();
             let st = save_timeout.clone();
             let src_id = glib::timeout_add_local_once(
-                std::time::Duration::from_millis(250),
+                std::time::Duration::from_millis(350),
                 move || {
                     st.borrow_mut().take();
                     cfg.borrow().save();
@@ -123,6 +123,7 @@ pub fn build_settings_sidebar(
     {
         let cfg = config.clone();
         let changed = on_config_changed.clone();
+        let save = request_save.clone();
         let is_syncing_switch = is_syncing.clone();
         dark_mode_switch.connect_active_notify(move |sw| {
             if is_syncing_switch.get() {
@@ -132,7 +133,7 @@ pub fn build_settings_sidebar(
             let is_currently_dark = cfg.borrow().is_dark();
             if active != is_currently_dark {
                 cfg.borrow_mut().toggle_dark_mode();
-                cfg.borrow().save();
+                save();
                 changed();
             }
         });
@@ -161,6 +162,7 @@ pub fn build_settings_sidebar(
         ("light", "theme-btn-light"),
         ("sepia", "theme-btn-sepia"),
         ("dark", "theme-btn-dark"),
+        ("charcoal", "theme-btn-charcoal"),
         ("oled", "theme-btn-oled"),
         ("custom", "theme-btn-custom"),
     ];
@@ -184,6 +186,7 @@ pub fn build_settings_sidebar(
 
         let cfg = config.clone();
         let changed = on_config_changed.clone();
+        let save = request_save.clone();
         let name = theme_name.to_string();
         let is_syncing_btn = is_syncing.clone();
         btn.connect_toggled(move |b| {
@@ -192,7 +195,7 @@ pub fn build_settings_sidebar(
             }
             if b.is_active() {
                 cfg.borrow_mut().theme = name.clone();
-                cfg.borrow().save();
+                save();
                 changed();
             }
         });
@@ -217,20 +220,22 @@ pub fn build_settings_sidebar(
     let custom_bg_row = color_row("Background", &config.borrow().custom_bg, {
         let cfg = config.clone();
         let changed = on_config_changed.clone();
+        let save = request_save.clone();
         move |color| {
             cfg.borrow_mut().custom_bg = color;
-            cfg.borrow().save();
+            save();
             changed();
         }
     });
     custom_section.append(&custom_bg_row);
 
-    let custom_fg_row = color_row("Text", &config.borrow().custom_fg, {
+    let custom_fg_row = color_row("Main Text", &config.borrow().custom_fg, {
         let cfg = config.clone();
         let changed = on_config_changed.clone();
+        let save = request_save.clone();
         move |color| {
             cfg.borrow_mut().custom_fg = color;
-            cfg.borrow().save();
+            save();
             changed();
         }
     });
@@ -239,9 +244,10 @@ pub fn build_settings_sidebar(
     let custom_accent_row = color_row("Accent", &config.borrow().custom_accent, {
         let cfg = config.clone();
         let changed = on_config_changed.clone();
+        let save = request_save.clone();
         move |color| {
             cfg.borrow_mut().custom_accent = color;
-            cfg.borrow().save();
+            save();
             changed();
         }
     });
@@ -256,9 +262,10 @@ pub fn build_settings_sidebar(
     let font_row = font_picker_row("Font Family", &config.borrow().font_family, {
         let cfg = config.clone();
         let changed = on_config_changed.clone();
+        let save = request_save.clone();
         move |val| {
             cfg.borrow_mut().font_family = val;
-            cfg.borrow().save();
+            save();
             changed();
         }
     });
@@ -267,8 +274,8 @@ pub fn build_settings_sidebar(
     // Font size slider
     let font_size_row = labeled_scale(
         "Font Size",
-        14.0,
-        32.0,
+        10.0,
+        48.0,
         1.0,
         config.borrow().font_size,
         "px",
@@ -276,13 +283,18 @@ pub fn build_settings_sidebar(
             let cfg = config.clone();
             let changed = on_config_changed.clone();
             let save = request_save.clone();
+            let is_syncing = is_syncing.clone();
             move |val| {
+                if is_syncing.get() {
+                    return;
+                }
                 cfg.borrow_mut().font_size = val;
                 save();
                 changed();
             }
         },
     );
+    let font_size_scale = font_size_row.last_child().and_downcast::<gtk::Scale>();
     inner.append(&font_size_row);
 
     // Line height slider
@@ -327,11 +339,32 @@ pub fn build_settings_sidebar(
     );
     inner.append(&letter_row);
 
-    // Max column width
+    // Paragraph Spacing slider (4px - 48px, step 2px)
+    let para_spacing_row = labeled_scale(
+        "Paragraph Spacing",
+        4.0,
+        48.0,
+        2.0,
+        config.borrow().paragraph_spacing_px as f64,
+        "px",
+        {
+            let cfg = config.clone();
+            let changed = on_config_changed.clone();
+            let save = request_save.clone();
+            move |val| {
+                cfg.borrow_mut().paragraph_spacing_px = val.round() as u32;
+                save();
+                changed();
+            }
+        },
+    );
+    inner.append(&para_spacing_row);
+
+    // Max column width (expanded: 320px - 1400px for ultrawide and broad margins)
     let width_row = labeled_scale(
         "Max Width",
-        550.0,
-        950.0,
+        320.0,
+        1400.0,
         10.0,
         config.borrow().max_width,
         "px",
@@ -348,11 +381,11 @@ pub fn build_settings_sidebar(
     );
     inner.append(&width_row);
 
-    // Text margin slider
+    // Text margin slider (expanded 3x upper limit: 12px - 360px)
     let margin_row = labeled_scale(
         "Text Margin",
         12.0,
-        120.0,
+        360.0,
         4.0,
         config.borrow().margin,
         "px",
@@ -394,10 +427,11 @@ pub fn build_settings_sidebar(
     {
         let cfg = config.clone();
         let changed = on_config_changed.clone();
+        let save = request_save.clone();
         align_left.connect_toggled(move |b| {
             if b.is_active() {
                 cfg.borrow_mut().justified = false;
-                cfg.borrow().save();
+                save();
                 changed();
             }
         });
@@ -405,10 +439,11 @@ pub fn build_settings_sidebar(
     {
         let cfg = config.clone();
         let changed = on_config_changed.clone();
+        let save = request_save.clone();
         align_justify.connect_toggled(move |b| {
             if b.is_active() {
                 cfg.borrow_mut().justified = true;
-                cfg.borrow().save();
+                save();
                 changed();
             }
         });
@@ -422,6 +457,65 @@ pub fn build_settings_sidebar(
     let focus_title = section_title("Comfort & Focus");
     inner.append(&focus_title);
 
+    // Smooth Scrolling toggle switch
+    let smooth_scroll_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .margin_bottom(4)
+        .build();
+
+    let smooth_scroll_label = gtk::Label::builder()
+        .label("Smooth Scrolling")
+        .halign(gtk::Align::Start)
+        .hexpand(true)
+        .build();
+
+    let smooth_scroll_switch = gtk::Switch::builder()
+        .active(config.borrow().smooth_scrolling)
+        .valign(gtk::Align::Center)
+        .tooltip_text("Enable frame-synced smooth scrolling for keyboard navigation")
+        .build();
+
+    {
+        let cfg = config.clone();
+        let changed = on_config_changed.clone();
+        let save = request_save.clone();
+        let is_syncing_switch = is_syncing.clone();
+        smooth_scroll_switch.connect_active_notify(move |sw| {
+            if is_syncing_switch.get() {
+                return;
+            }
+            cfg.borrow_mut().smooth_scrolling = sw.is_active();
+            save();
+            changed();
+        });
+    }
+
+    smooth_scroll_box.append(&smooth_scroll_label);
+    smooth_scroll_box.append(&smooth_scroll_switch);
+    inner.append(&smooth_scroll_box);
+
+    // Scroll step slider
+    let step_row = labeled_scale(
+        "Scroll Step",
+        40.0,
+        300.0,
+        10.0,
+        config.borrow().scroll_step_px,
+        "px",
+        {
+            let cfg = config.clone();
+            let changed = on_config_changed.clone();
+            let save = request_save.clone();
+            move |val| {
+                cfg.borrow_mut().scroll_step_px = val.round();
+                save();
+                changed();
+            }
+        },
+    );
+    inner.append(&step_row);
+
     // Progress bar toggle
     let progress_check = gtk::CheckButton::builder()
         .label("Show Reading Progress Bar")
@@ -430,9 +524,10 @@ pub fn build_settings_sidebar(
     {
         let cfg = config.clone();
         let changed = on_config_changed.clone();
+        let save = request_save.clone();
         progress_check.connect_toggled(move |b| {
             cfg.borrow_mut().show_progress_bar = b.is_active();
-            cfg.borrow().save();
+            save();
             changed();
         });
     }
@@ -475,9 +570,10 @@ pub fn build_settings_sidebar(
     {
         let cfg = config.clone();
         let changed = on_config_changed.clone();
+        let save = request_save.clone();
         clipboard_check.connect_toggled(move |b| {
             cfg.borrow_mut().auto_detect_clipboard = b.is_active();
-            cfg.borrow().save();
+            save();
             changed();
         });
     }
@@ -490,7 +586,10 @@ pub fn build_settings_sidebar(
     let shortcuts = [
         ("Ctrl+L", "Focus URL bar"),
         ("Ctrl+,", "Toggle settings"),
-        ("j / k", "Smooth scroll down / up"),
+        ("Ctrl++ / Ctrl+-", "Zoom in / out"),
+        ("Ctrl+0", "Reset zoom (100%)"),
+        ("Alt+← / Alt+→", "History back / forward"),
+        ("j / k, ↓ / ↑", "Smooth scroll down / up"),
         ("Space", "Scroll down page (browser)"),
         ("Shift+Space", "Scroll up page (browser)"),
         ("s", "Toggle auto-scroll"),
@@ -543,13 +642,19 @@ pub fn build_settings_sidebar(
         let config = config.clone();
         let is_syncing = is_syncing.clone();
         let dark_mode_switch = dark_mode_switch.clone();
+        let smooth_scroll_switch = smooth_scroll_switch.clone();
         let theme_toggle_group = theme_toggle_group.clone();
+        let font_size_scale = font_size_scale.clone();
         let theme_names: Vec<String> = theme_buttons.iter().map(|(n, _)| n.to_string()).collect();
 
         Rc::new(move || {
             is_syncing.set(true);
             let cfg = config.borrow();
             dark_mode_switch.set_active(cfg.is_dark());
+            smooth_scroll_switch.set_active(cfg.smooth_scrolling);
+            if let Some(ref scale) = font_size_scale {
+                scale.set_value(cfg.font_size);
+            }
             let btns = theme_toggle_group.borrow();
             for (idx, name) in theme_names.iter().enumerate() {
                 if let Some(btn) = btns.get(idx) {
@@ -579,6 +684,34 @@ fn capitalize(s: &str) -> String {
         None => String::new(),
         Some(f) => f.to_uppercase().to_string() + c.as_str(),
     }
+}
+
+/// Disable mouse wheel / touchpad scrolling on a gtk::Scale so it doesn't accidentally
+/// change slider values when scrolling the settings panel, while forwarding the scroll
+/// delta to the parent ScrolledWindow so the drawer scrolls smoothly.
+pub fn disable_scroll_on_scale(scale: &gtk::Scale) {
+    let scroll_controller = gtk::EventControllerScroll::new(
+        gtk::EventControllerScrollFlags::BOTH_AXES | gtk::EventControllerScrollFlags::KINETIC,
+    );
+    scroll_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+    scroll_controller.connect_scroll(move |controller, _dx, dy| {
+        // Forward scroll delta to parent ScrolledWindow if present
+        if let Some(widget) = controller.widget() {
+            if let Some(ancestor) = widget.ancestor(gtk::ScrolledWindow::static_type()) {
+                if let Some(scroller) = ancestor.downcast_ref::<gtk::ScrolledWindow>() {
+                    let vadj = scroller.vadjustment();
+                    let step = vadj.step_increment().max(35.0);
+                    let page = vadj.page_size();
+                    let upper = (vadj.upper() - page).max(0.0);
+                    let new_val = (vadj.value() + dy * step).clamp(0.0, upper);
+                    vadj.set_value(new_val);
+                }
+            }
+        }
+        // Stop propagation on Scale so it doesn't modify slider value
+        glib::Propagation::Stop
+    });
+    scale.add_controller(scroll_controller);
 }
 
 fn labeled_scale(
@@ -612,12 +745,12 @@ fn labeled_scale(
     scale.set_hexpand(true);
     scale.set_draw_value(false);
 
+    // Disable scroll wheel on scale so user doesn't accidentally change values
+    disable_scroll_on_scale(&scale);
+
     let label_clone = label.clone();
     let label_text_owned = label_text.to_string();
 
-    // 16ms frame-throttling to keep UI running at 60 FPS without event backlog
-    let pending_source: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
-    let latest_val = Rc::new(Cell::new(initial));
     let on_change = Rc::new(on_change);
 
     scale.connect_value_changed(move |s| {
@@ -628,21 +761,7 @@ fn labeled_scale(
             format!("{label_text_owned}: {val:.0}{unit_owned}")
         };
         label_clone.set_label(&text);
-        latest_val.set(val);
-
-        if pending_source.borrow().is_none() {
-            let ps = pending_source.clone();
-            let lv = latest_val.clone();
-            let oc = on_change.clone();
-            let source_id = glib::timeout_add_local_once(
-                std::time::Duration::from_millis(16),
-                move || {
-                    ps.borrow_mut().take();
-                    oc(lv.get());
-                },
-            );
-            *pending_source.borrow_mut() = Some(source_id);
-        }
+        on_change(val);
     });
 
     container.append(&label);
@@ -677,13 +796,23 @@ fn font_picker_row(
         .hexpand(true)
         .build();
 
-    let initial_desc = gtk::pango::FontDescription::from_string(initial_font);
+    let mut initial_desc = gtk::pango::FontDescription::new();
+    let clean_initial = initial_font.trim().trim_matches('"').trim_matches('\'').trim();
+    initial_desc.set_family(clean_initial);
     font_btn.set_font_desc(&initial_desc);
 
     font_btn.connect_font_desc_notify(move |btn| {
         if let Some(desc) = btn.font_desc() {
-            if let Some(family) = desc.family() {
-                on_change(family.to_string());
+            let family_opt = desc.family().map(|f| f.to_string()).or_else(|| {
+                let s = desc.to_str();
+                let f = s.split_whitespace().next().unwrap_or("Times New Roman");
+                Some(f.to_string())
+            });
+            if let Some(family) = family_opt {
+                let clean_family = family.trim().trim_matches('"').trim_matches('\'').trim().to_string();
+                if !clean_family.is_empty() {
+                    on_change(clean_family);
+                }
             }
         }
     });

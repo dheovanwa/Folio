@@ -10,8 +10,8 @@ Folio strips out clutter, advertisements, popups, and layout distractions, prese
 
 - **Distraction-Free Reading:** Pure Rust content extraction powered by `dom_smoothie` (Mozilla Readability algorithm) to extract clean titles, bylines, and main article text.
 - **Reading Comfort Drawer (`Aa` / `Ctrl + ,`):**
-  - **Color Themes:** Built-in presets for *Light (Paper)*, *Sepia*, *Dark*, *OLED Pure Black*, and fully customizable theme colors.
-  - **Typography & Layout:** System font family picker, font size (`14px`–`32px`), line height (`1.2`–`2.2`), max column width (`550px`–`950px`), text margin (`12px`–`120px`), and text alignment (left / justified).
+  - **Color Themes:** Built-in presets for *Light (Paper)*, *Sepia*, *Dark*, *Charcoal (Graphite Gray)*, *OLED Pure Black*, and fully customizable theme colors (custom main text, background, and accent).
+  - **Typography & Layout:** System font family picker, font size (`14px`–`32px`), line height (`1.2`–`2.2`), max column width (`320px`–`1400px`), text margin (`12px`–`360px`), and text alignment (left / justified).
   - **Live Preview:** Instantaneous UI updates with frame throttling and debounced persistence to `~/.config/folio/config.toml`.
 - **High-Efficiency Memory Footprint:**
   - Integrated `mimalloc` global allocator with aggressive heap release.
@@ -64,6 +64,11 @@ cargo build --release
 | :--- | :--- |
 | `Ctrl + L` | Focus and select URL bar |
 | `Ctrl + ,` | Toggle reading comfort drawer |
+| `Ctrl + +` / `Ctrl + =` | Zoom in (increase font size) |
+| `Ctrl + -` | Zoom out (decrease font size) |
+| `Ctrl + 0` | Reset zoom to default (100%) |
+| `Ctrl + Scroll` | Zoom in / out with mouse wheel |
+| `Alt + ←` / `Alt + →` | Browser history back / forward |
 | `Space` | Page scroll down |
 | `Shift + Space` | Page scroll up |
 | `j` / `k` | Smooth scroll down / up |
