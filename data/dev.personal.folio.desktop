@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Folio
+Comment=A lightweight, distraction-free article reader
+Exec=folio %u
+Icon=accessories-text-editor
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;Office;
+MimeType=x-scheme-handler/http;x-scheme-handler/https;
+Keywords=reader;article;read;distraction-free;
+StartupWMClass=dev.personal.folio
