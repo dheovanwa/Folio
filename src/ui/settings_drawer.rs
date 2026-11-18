@@ -1,8 +1,8 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use adw::prelude::*;
 use gtk::glib;
-use gtk::prelude::*;
 
 use crate::config::Config;
 
@@ -14,6 +14,7 @@ pub fn build_settings_sidebar(
     config: Rc<RefCell<Config>>,
     on_config_changed: Rc<dyn Fn()>,
     on_close_sidebar: Rc<dyn Fn()>,
+    on_show_shortcuts: Rc<dyn Fn()>,
 ) -> (gtk::Box, Rc<dyn Fn()>) {
     let sidebar = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -164,7 +165,6 @@ pub fn build_settings_sidebar(
         ("dark", "theme-btn-dark"),
         ("charcoal", "theme-btn-charcoal"),
         ("oled", "theme-btn-oled"),
-        ("custom", "theme-btn-custom"),
     ];
 
     let theme_toggle_group: Rc<RefCell<Vec<gtk::ToggleButton>>> = Rc::new(RefCell::new(Vec::new()));
@@ -194,7 +194,7 @@ pub fn build_settings_sidebar(
                 return;
             }
             if b.is_active() {
-                cfg.borrow_mut().theme = name.clone();
+                cfg.borrow_mut().set_theme(&name);
                 save();
                 changed();
             }
@@ -208,51 +208,75 @@ pub fn build_settings_sidebar(
     }
     inner.append(&theme_box);
 
-    // ── Custom Colors (only meaningful when theme = custom) ──
-    let custom_section = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .spacing(4)
+    // ── Light & Dark Mode Preset Selection ──
+    let light_theme_model = gtk::StringList::new(&["Light", "Sepia"]);
+    let light_preset_row = adw::ComboRow::builder()
+        .title("Light Theme Preset")
+        .subtitle("Preset used when Light Mode is active")
+        .model(&light_theme_model)
+        .selected(match config.borrow().light_theme.as_str() {
+            "sepia" => 1,
+            _ => 0,
+        })
         .build();
 
-    let custom_label = section_title("Custom Colors");
-    custom_section.append(&custom_label);
+    let dark_theme_model = gtk::StringList::new(&["Dark", "Charcoal", "OLED"]);
+    let dark_preset_row = adw::ComboRow::builder()
+        .title("Dark Theme Preset")
+        .subtitle("Preset used when Dark Mode is active")
+        .model(&dark_theme_model)
+        .selected(match config.borrow().dark_theme.as_str() {
+            "charcoal" => 1,
+            "oled" => 2,
+            _ => 0,
+        })
+        .build();
 
-    let custom_bg_row = color_row("Background", &config.borrow().custom_bg, {
+    let theme_preset_group = adw::PreferencesGroup::new();
+    theme_preset_group.set_margin_top(8);
+    theme_preset_group.set_margin_bottom(6);
+    theme_preset_group.add(&light_preset_row);
+    theme_preset_group.add(&dark_preset_row);
+    inner.append(&theme_preset_group);
+
+    {
         let cfg = config.clone();
         let changed = on_config_changed.clone();
         let save = request_save.clone();
-        move |color| {
-            cfg.borrow_mut().custom_bg = color;
+        let is_syncing_row = is_syncing.clone();
+        light_preset_row.connect_selected_notify(move |row| {
+            if is_syncing_row.get() {
+                return;
+            }
+            let chosen = match row.selected() {
+                1 => "sepia",
+                _ => "light",
+            };
+            cfg.borrow_mut().set_light_theme(chosen);
             save();
             changed();
-        }
-    });
-    custom_section.append(&custom_bg_row);
+        });
+    }
 
-    let custom_fg_row = color_row("Main Text", &config.borrow().custom_fg, {
+    {
         let cfg = config.clone();
         let changed = on_config_changed.clone();
         let save = request_save.clone();
-        move |color| {
-            cfg.borrow_mut().custom_fg = color;
+        let is_syncing_row = is_syncing.clone();
+        dark_preset_row.connect_selected_notify(move |row| {
+            if is_syncing_row.get() {
+                return;
+            }
+            let chosen = match row.selected() {
+                1 => "charcoal",
+                2 => "oled",
+                _ => "dark",
+            };
+            cfg.borrow_mut().set_dark_theme(chosen);
             save();
             changed();
-        }
-    });
-    custom_section.append(&custom_fg_row);
-
-    let custom_accent_row = color_row("Accent", &config.borrow().custom_accent, {
-        let cfg = config.clone();
-        let changed = on_config_changed.clone();
-        let save = request_save.clone();
-        move |color| {
-            cfg.borrow_mut().custom_accent = color;
-            save();
-            changed();
-        }
-    });
-    custom_section.append(&custom_accent_row);
-    inner.append(&custom_section);
+        });
+    }
 
     // ── Section: Typography ──
     let typo_title = section_title("Typography & Layout");
@@ -273,7 +297,7 @@ pub fn build_settings_sidebar(
 
     // Font size slider
     let font_size_row = labeled_scale(
-        "Font Size",
+        "Article Font Size",
         10.0,
         48.0,
         1.0,
@@ -296,6 +320,59 @@ pub fn build_settings_sidebar(
     );
     let font_size_scale = font_size_row.last_child().and_downcast::<gtk::Scale>();
     inner.append(&font_size_row);
+
+    // Interface (chrome) font size — header bar, settings drawer, library
+    // rows, empty state, navigation buttons.
+    let ui_font_row = labeled_scale(
+        "Interface Font Size",
+        9.0,
+        40.0,
+        1.0,
+        config.borrow().ui_font_size,
+        "px",
+        {
+            let cfg = config.clone();
+            let changed = on_config_changed.clone();
+            let save = request_save.clone();
+            let is_syncing = is_syncing.clone();
+            move |val| {
+                if is_syncing.get() {
+                    return;
+                }
+                cfg.borrow_mut().ui_font_size = val;
+                save();
+                changed();
+            }
+        },
+    );
+    let ui_font_scale = ui_font_row.last_child().and_downcast::<gtk::Scale>();
+    inner.append(&ui_font_row);
+
+    // Contents sidebar font size.
+    let toc_font_row = labeled_scale(
+        "Contents Sidebar Size",
+        9.0,
+        40.0,
+        1.0,
+        config.borrow().toc_font_size,
+        "px",
+        {
+            let cfg = config.clone();
+            let changed = on_config_changed.clone();
+            let save = request_save.clone();
+            let is_syncing = is_syncing.clone();
+            move |val| {
+                if is_syncing.get() {
+                    return;
+                }
+                cfg.borrow_mut().toc_font_size = val;
+                save();
+                changed();
+            }
+        },
+    );
+    let toc_font_scale = toc_font_row.last_child().and_downcast::<gtk::Scale>();
+    inner.append(&toc_font_row);
 
     // Line height slider
     let line_height_row = labeled_scale(
@@ -579,19 +656,78 @@ pub fn build_settings_sidebar(
     }
     inner.append(&clipboard_check);
 
+    // ── Section: General ──
+    let general_title = section_title("General");
+    inner.append(&general_title);
+
+    let startup_model = gtk::StringList::new(&["Blank Page", "Recent Page"]);
+    let startup_row = adw::ComboRow::builder()
+        .title("On Startup")
+        .subtitle("Choose what to display when Folio opens")
+        .model(&startup_model)
+        .selected(match config.borrow().startup_behavior {
+            crate::config::StartupBehavior::BlankPage => 0,
+            crate::config::StartupBehavior::RecentPage => 1,
+        })
+        .build();
+
+    let general_group = adw::PreferencesGroup::new();
+    general_group.add(&startup_row);
+    inner.append(&general_group);
+
+    {
+        let cfg = config.clone();
+        let changed = on_config_changed.clone();
+        let save = request_save.clone();
+        let is_syncing_row = is_syncing.clone();
+        startup_row.connect_selected_notify(move |row| {
+            if is_syncing_row.get() {
+                return;
+            }
+            let behavior = match row.selected() {
+                1 => crate::config::StartupBehavior::RecentPage,
+                _ => crate::config::StartupBehavior::BlankPage,
+            };
+            cfg.borrow_mut().startup_behavior = behavior;
+            save();
+            changed();
+        });
+    }
+
     // ── Keyboard Shortcuts Reference ──
     let kb_title = section_title("Keyboard Shortcuts");
     inner.append(&kb_title);
 
+    let shortcuts_btn = gtk::Button::builder()
+        .label("View All Shortcuts (Ctrl+? / F1)")
+        .icon_name("preferences-desktop-keyboard-shortcuts-symbolic")
+        .tooltip_text("Open keyboard shortcuts dialog (Ctrl+? / F1)")
+        .halign(gtk::Align::Fill)
+        .build();
+    shortcuts_btn.add_css_class("flat");
+    {
+        let show_sc = on_show_shortcuts.clone();
+        shortcuts_btn.connect_clicked(move |_| {
+            show_sc();
+        });
+    }
+    inner.append(&shortcuts_btn);
+
     let shortcuts = [
+        ("Ctrl+? / F1", "Show keyboard shortcuts"),
         ("Ctrl+L", "Focus URL bar"),
+        ("Ctrl+F", "Find in article"),
+        ("F3 / Shift+F3", "Next / previous search match"),
+        ("Ctrl+C", "Copy selected text"),
+        ("Ctrl+A", "Select all article text"),
+        ("Ctrl+R / F5", "Refresh article"),
         ("Ctrl+,", "Toggle settings"),
         ("Ctrl++ / Ctrl+-", "Zoom in / out"),
         ("Ctrl+0", "Reset zoom (100%)"),
         ("Alt+← / Alt+→", "History back / forward"),
         ("j / k, ↓ / ↑", "Smooth scroll down / up"),
         ("Space", "Scroll down page (browser)"),
-        ("Shift+Space", "Scroll up page (browser)"),
+        ("Shift+Space / Backspace", "Scroll up page (browser)"),
         ("s", "Toggle auto-scroll"),
         ("t", "Toggle dark/light mode"),
         ("F11", "Zen mode (fullscreen)"),
@@ -624,16 +760,80 @@ pub fn build_settings_sidebar(
 
     let config_path = Config::config_path();
     let config_path_str = config_path.display().to_string();
+
+    let config_row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .hexpand(true)
+        .build();
+
+    let config_btn = gtk::Button::builder()
+        .tooltip_text("Click to open in default file manager")
+        .hexpand(true)
+        .build();
+    config_btn.set_cursor_from_name(Some("pointer"));
+    config_btn.add_css_class("flat");
+    config_btn.add_css_class("config-path-btn");
+
+    let btn_content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .hexpand(true)
+        .build();
+
+    let path_icon = gtk::Image::builder()
+        .icon_name("folder-open-symbolic")
+        .valign(gtk::Align::Center)
+        .build();
+    path_icon.add_css_class("dim-label");
+
     let config_label = gtk::Label::builder()
         .label(&config_path_str)
         .halign(gtk::Align::Start)
+        .valign(gtk::Align::Center)
         .wrap(true)
-        .selectable(true)
+        .hexpand(true)
         .build();
     config_label.add_css_class("dim-label");
     config_label.add_css_class("caption");
     config_label.add_css_class("monospace");
-    inner.append(&config_label);
+
+    btn_content.append(&path_icon);
+    btn_content.append(&config_label);
+    config_btn.set_child(Some(&btn_content));
+
+    {
+        let config_path = config_path.clone();
+        config_btn.connect_clicked(move |_| {
+            open_in_file_explorer(&config_path);
+        });
+    }
+
+    let copy_btn = gtk::Button::builder()
+        .icon_name("edit-copy-symbolic")
+        .tooltip_text("Copy path to clipboard")
+        .valign(gtk::Align::Center)
+        .build();
+    copy_btn.add_css_class("flat");
+
+    {
+        let path_str = config_path_str.clone();
+        let copy_btn_clone = copy_btn.clone();
+        copy_btn.connect_clicked(move |_| {
+            if let Some(disp) = gtk::gdk::Display::default() {
+                disp.clipboard().set_text(&path_str);
+            }
+            copy_btn_clone.set_icon_name("object-select-symbolic");
+            let btn_reset = copy_btn_clone.clone();
+            glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
+                btn_reset.set_icon_name("edit-copy-symbolic");
+            });
+        });
+    }
+
+    config_row.append(&config_btn);
+    config_row.append(&copy_btn);
+    inner.append(&config_row);
 
     scroller.set_child(Some(&inner));
     sidebar.append(&scroller);
@@ -642,18 +842,42 @@ pub fn build_settings_sidebar(
         let config = config.clone();
         let is_syncing = is_syncing.clone();
         let dark_mode_switch = dark_mode_switch.clone();
+        let light_preset_row = light_preset_row.clone();
+        let dark_preset_row = dark_preset_row.clone();
         let smooth_scroll_switch = smooth_scroll_switch.clone();
+        let startup_row = startup_row.clone();
         let theme_toggle_group = theme_toggle_group.clone();
         let font_size_scale = font_size_scale.clone();
+        let ui_font_scale = ui_font_scale.clone();
+        let toc_font_scale = toc_font_scale.clone();
         let theme_names: Vec<String> = theme_buttons.iter().map(|(n, _)| n.to_string()).collect();
 
         Rc::new(move || {
             is_syncing.set(true);
             let cfg = config.borrow();
             dark_mode_switch.set_active(cfg.is_dark());
+            light_preset_row.set_selected(match cfg.light_theme.as_str() {
+                "sepia" => 1,
+                _ => 0,
+            });
+            dark_preset_row.set_selected(match cfg.dark_theme.as_str() {
+                "charcoal" => 1,
+                "oled" => 2,
+                _ => 0,
+            });
             smooth_scroll_switch.set_active(cfg.smooth_scrolling);
+            startup_row.set_selected(match cfg.startup_behavior {
+                crate::config::StartupBehavior::BlankPage => 0,
+                crate::config::StartupBehavior::RecentPage => 1,
+            });
             if let Some(ref scale) = font_size_scale {
                 scale.set_value(cfg.font_size);
+            }
+            if let Some(ref scale) = ui_font_scale {
+                scale.set_value(cfg.ui_font_size);
+            }
+            if let Some(ref scale) = toc_font_scale {
+                scale.set_value(cfg.toc_font_size);
             }
             let btns = theme_toggle_group.borrow();
             for (idx, name) in theme_names.iter().enumerate() {
@@ -791,6 +1015,7 @@ fn font_picker_row(
 
     let font_btn = gtk::FontDialogButton::builder()
         .dialog(&dialog)
+        .level(gtk::FontLevel::Family)
         .use_font(true)
         .use_size(false)
         .hexpand(true)
@@ -822,45 +1047,106 @@ fn font_picker_row(
     container
 }
 
+/// Open the directory containing a file in the default system file manager.
+pub fn open_in_file_explorer(path: &std::path::Path) {
+    let parent_dir = if path.is_file() {
+        path.parent().unwrap_or(path)
+    } else {
+        path
+    };
 
-fn color_row(
-    label_text: &str,
-    initial_hex: &str,
-    on_change: impl Fn(String) + 'static,
-) -> gtk::Box {
-    let row = gtk::Box::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .spacing(8)
-        .build();
+    // Ensure parent directory exists so file manager doesn't report an error
+    let _ = std::fs::create_dir_all(parent_dir);
 
-    let label = gtk::Label::builder()
-        .label(label_text)
-        .halign(gtk::Align::Start)
-        .hexpand(true)
-        .build();
+    // Primary GTK4 method: open containing folder and highlight the file
+    let gfile = gtk::gio::File::for_path(path);
+    let launcher = gtk::FileLauncher::new(Some(&gfile));
+    let path_buf = path.to_path_buf();
+    launcher.open_containing_folder(
+        None::<&gtk::Window>,
+        None::<&gtk::gio::Cancellable>,
+        move |res| {
+            if res.is_err() {
+                // Fallback 1: launch folder directly via GTK FileLauncher
+                let parent = if path_buf.is_file() {
+                    path_buf.parent().unwrap_or(&path_buf)
+                } else {
+                    &path_buf
+                };
+                let dir_gfile = gtk::gio::File::for_path(parent);
+                let dir_launcher = gtk::FileLauncher::new(Some(&dir_gfile));
+                let parent_buf = parent.to_path_buf();
+                dir_launcher.launch(
+                    None::<&gtk::Window>,
+                    None::<&gtk::gio::Cancellable>,
+                    move |dir_res| {
+                        if dir_res.is_err() {
+                            // Fallback 2: launch via xdg-open command
+                            let _ = std::process::Command::new("xdg-open")
+                                .arg(&parent_buf)
+                                .spawn();
+                        }
+                    },
+                );
+            }
+        },
+    );
+}
 
-    let color_btn = gtk::ColorDialogButton::builder().build();
-    let rgba = gtk::gdk::RGBA::parse(initial_hex).unwrap_or(gtk::gdk::RGBA::BLACK);
-    color_btn.set_rgba(&rgba);
+#[cfg(test)]
+mod tests {
+    use crate::config::Config;
 
-    let dialog = gtk::ColorDialog::builder()
-        .title(label_text)
-        .modal(true)
-        .build();
-    color_btn.set_dialog(&dialog);
+    #[test]
+    fn test_theme_preset_combo_mapping() {
+        let light_to_idx = |theme: &str| -> u32 {
+            match theme {
+                "sepia" => 1,
+                _ => 0,
+            }
+        };
 
-    color_btn.connect_rgba_notify(move |btn| {
-        let rgba = btn.rgba();
-        let hex = format!(
-            "#{:02x}{:02x}{:02x}",
-            (rgba.red() * 255.0) as u8,
-            (rgba.green() * 255.0) as u8,
-            (rgba.blue() * 255.0) as u8,
-        );
-        on_change(hex);
-    });
+        let idx_to_light = |idx: u32| -> &'static str {
+            match idx {
+                1 => "sepia",
+                _ => "light",
+            }
+        };
 
-    row.append(&label);
-    row.append(&color_btn);
-    row
+        assert_eq!(light_to_idx("light"), 0);
+        assert_eq!(light_to_idx("sepia"), 1);
+        assert_eq!(idx_to_light(0), "light");
+        assert_eq!(idx_to_light(1), "sepia");
+
+        let dark_to_idx = |theme: &str| -> u32 {
+            match theme {
+                "charcoal" => 1,
+                "oled" => 2,
+                _ => 0,
+            }
+        };
+
+        let idx_to_dark = |idx: u32| -> &'static str {
+            match idx {
+                1 => "charcoal",
+                2 => "oled",
+                _ => "dark",
+            }
+        };
+
+        assert_eq!(dark_to_idx("dark"), 0);
+        assert_eq!(dark_to_idx("charcoal"), 1);
+        assert_eq!(dark_to_idx("oled"), 2);
+        assert_eq!(idx_to_dark(0), "dark");
+        assert_eq!(idx_to_dark(1), "charcoal");
+        assert_eq!(idx_to_dark(2), "oled");
+    }
+
+    #[test]
+    fn test_config_path_resolution() {
+        let path = Config::config_path();
+        let path_str = path.to_string_lossy();
+        assert!(path_str.contains("folio"));
+        assert!(path_str.ends_with("config.toml"));
+    }
 }

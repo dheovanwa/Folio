@@ -205,6 +205,40 @@ impl Storage {
         )?;
         Ok(())
     }
+
+    /// Get the most recent article URL from reading history or saved articles.
+    pub fn get_recent_article_url(&self) -> Result<Option<String>, rusqlite::Error> {
+        let history_url: Result<String, _> = self.conn.query_row(
+            "SELECT url FROM reading_history ORDER BY id DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        );
+        if let Ok(url) = history_url {
+            if !url.trim().is_empty() {
+                return Ok(Some(url));
+            }
+        }
+
+        let article_url: Result<String, _> = self.conn.query_row(
+            "SELECT url FROM articles ORDER BY COALESCE(last_read_at, saved_at) DESC, id DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        );
+        match article_url {
+            Ok(url) if !url.trim().is_empty() => Ok(Some(url)),
+            _ => Ok(None),
+        }
+    }
+
+    /// Get the most recent saved article from reading history or library.
+    #[allow(dead_code)]
+    pub fn get_recent_article(&self) -> Result<Option<SavedArticle>, rusqlite::Error> {
+        if let Some(url) = self.get_recent_article_url()? {
+            self.get_article(&url)
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -290,5 +324,31 @@ mod tests {
         storage
             .record_history("https://example.com/1", "Test")
             .unwrap();
+    }
+
+    #[test]
+    fn test_storage_recent_article_url() {
+        let storage = Storage::open_in_memory().expect("in-memory db opens");
+
+        // Fresh DB has no recent article
+        assert_eq!(storage.get_recent_article_url().unwrap(), None);
+
+        // Save article into library
+        storage
+            .save_article("https://example.com/first", "First", "", "", "", 1, None, None)
+            .unwrap();
+        assert_eq!(
+            storage.get_recent_article_url().unwrap().as_deref(),
+            Some("https://example.com/first")
+        );
+
+        // Record a newer navigation in reading history
+        storage
+            .record_history("https://example.com/second", "Second")
+            .unwrap();
+        assert_eq!(
+            storage.get_recent_article_url().unwrap().as_deref(),
+            Some("https://example.com/second")
+        );
     }
 }

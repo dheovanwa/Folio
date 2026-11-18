@@ -3,6 +3,8 @@ mod fetcher;
 mod storage;
 mod theme;
 mod ui;
+#[cfg(test)]
+mod test_support;
 
 use adw::prelude::*;
 use clap::Parser;
